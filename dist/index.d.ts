@@ -1,4 +1,4 @@
-import "./monitor.js";
+import "./crash-guardian.js";
 /**
  * BEST PRACTICE:
  * For tasks that use 100% CPU, Node.js becomes unresponsive because its single-threaded event loop is blocked.
