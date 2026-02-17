@@ -4,11 +4,14 @@ import process from "process";
 import v8 from "v8";
 import path from "path";
 import { monitorEventLoopDelay } from "perf_hooks";
+// Import request tracker to see active work during crash
+import { getActiveRequests } from "./request-tracker.js";
 /* ======================================================
    CONFIG
 ====================================================== */
 const LOG_DIR = path.join(process.cwd(), "logs");
 const LOG_FILE = path.join(LOG_DIR, "crash_log.log");
+const MARKER_FILE = path.join(LOG_DIR, "last_exit.json");
 /* ======================================================
    INIT LOG FILE SAFELY
 ====================================================== */
@@ -38,7 +41,15 @@ function log(level, message, extra = {}) {
             message,
             extra,
         };
-        fs.appendFileSync(LOG_FILE, JSON.stringify(payload) + "\n");
+        const logLine = JSON.stringify(payload) + "\n";
+        fs.appendFileSync(LOG_FILE, logLine);
+        // Also log to console for visibility in PM2/Logs
+        if (level === "ERROR" || level === "FATAL" || level === "SNAPSHOT") {
+            console.error(`[${level}] ${message}`, extra);
+        }
+        else {
+            console.log(`[${level}] ${message}`);
+        }
     }
     catch (err) {
         console.error("❌ Logging failed", err);
@@ -47,8 +58,8 @@ function log(level, message, extra = {}) {
 /* ======================================================
    SYSTEM SNAPSHOT
 ====================================================== */
-function systemSnapshot(reason) {
-    log("SNAPSHOT", reason, {
+function getSystemStats() {
+    return {
         memory: process.memoryUsage(),
         cpu: process.cpuUsage(),
         load: os.loadavg(),
@@ -56,6 +67,13 @@ function systemSnapshot(reason) {
         heap: v8.getHeapStatistics(),
         activeHandles: process._getActiveHandles?.()?.length,
         activeRequests: process._getActiveRequests?.()?.length,
+        ongoingApiCalls: getActiveRequests() // <-- ADDED THIS
+    };
+}
+function systemSnapshot(reason, subMessage) {
+    log("SNAPSHOT", reason, {
+        ...(subMessage ? { detail: subMessage } : {}),
+        stats: getSystemStats()
     });
 }
 /* ======================================================
@@ -66,47 +84,95 @@ loopMonitor.enable();
 setInterval(() => {
     const lagMs = loopMonitor.mean / 1e6;
     if (lagMs > 2000) {
-        systemSnapshot("EVENT_LOOP_BLOCKED");
+        systemSnapshot("EVENT_LOOP_BLOCKED", `Mean lag: ${lagMs.toFixed(2)}ms`);
     }
 }, 5000);
 /* ======================================================
    MEMORY WATCHDOG
 ====================================================== */
 setInterval(() => {
-    const rssMB = process.memoryUsage().rss / 1024 / 1024;
+    const mem = process.memoryUsage();
+    const rssMB = mem.rss / 1024 / 1024;
+    const heapUsedMB = mem.heapUsed / 1024 / 1024;
     if (rssMB > 800) {
-        systemSnapshot("HIGH_MEMORY_PRESSURE");
+        systemSnapshot("HIGH_MEMORY_PRESSURE", `RSS: ${rssMB.toFixed(2)}MB, HeapUsed: ${heapUsedMB.toFixed(2)}MB`);
     }
 }, 3000);
+/* ======================================================
+   DEATH NOTE (POST-MORTEM PREPARATION)
+====================================================== */
+function writeDeathNote(reason, error) {
+    const deathNote = {
+        time: new Date().toISOString(),
+        pid: process.pid,
+        reason,
+        error: error ? (error.stack || String(error)) : null,
+        stats: getSystemStats()
+    };
+    try {
+        fs.writeFileSync(MARKER_FILE, JSON.stringify(deathNote, null, 2));
+        log("INFO", `Death note written: ${reason}`);
+    }
+    catch (err) {
+        console.error("❌ Failed to write death note", err);
+    }
+}
 /* ======================================================
    GLOBAL ERROR TRAPS
 ====================================================== */
 process.on("uncaughtException", (err) => {
+    writeDeathNote("UNCAUGHT_EXCEPTION", err);
     systemSnapshot("UNCAUGHT_EXCEPTION");
     log("FATAL", err.stack || String(err));
     process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
-    systemSnapshot("UNHANDLED_REJECTION");
-    log("ERROR", String(reason));
+    systemSnapshot("UNHANDLED_REJECTION", String(reason));
+    log("ERROR", `Unhandled Rejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
 });
 /* ======================================================
    SIGNAL TRAPS (PM2 / OS KILLS)
 ====================================================== */
 ["SIGTERM", "SIGINT", "SIGABRT"].forEach((sig) => {
     process.on(sig, () => {
+        writeDeathNote(`SIGNAL_${sig}`);
         systemSnapshot(`SIGNAL_${sig}`);
+        // Clean exit marker if it was a manual/planned stop
+        if (fs.existsSync(MARKER_FILE)) {
+            // We keep it to analyze why it was stopped, but maybe mark as "GRACEFUL"
+        }
         process.exit(0);
     });
 });
+process.on("exit", (code) => {
+    log("INFO", `Process exiting with code: ${code}`);
+});
+/* ======================================================
+   POST-MORTEM CHECK (STARTUP)
+====================================================== */
+function checkPostMortem() {
+    if (fs.existsSync(MARKER_FILE)) {
+        try {
+            const lastExit = JSON.parse(fs.readFileSync(MARKER_FILE, "utf-8"));
+            log("ALERT", "POST-MORTEM ANALYSIS: Previous process did not exit cleanly or was signaled.", lastExit);
+            // Optionally move to a history file instead of just deleting
+            const historyFile = path.join(LOG_DIR, `crash_history_${Date.now()}.json`);
+            fs.renameSync(MARKER_FILE, historyFile);
+        }
+        catch (err) {
+            console.error("❌ Failed to read post-mortem marker", err);
+        }
+    }
+}
 /* ======================================================
    HEARTBEAT (LIVENESS)
 ====================================================== */
 setInterval(() => {
-    log("HEARTBEAT", "process alive");
+    log("HEARTBEAT", "process alive", { uptime: process.uptime() });
 }, 10000);
 /* ======================================================
-   STARTUP MARKER
+   STARTUP
 ====================================================== */
-log("INFO", "Crash Guardian initialized successfully");
+checkPostMortem();
+log("INFO", "Crash Guardian v2 initialized successfully");
 //# sourceMappingURL=crash-guardian.js.map

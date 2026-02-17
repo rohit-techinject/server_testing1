@@ -1,5 +1,5 @@
 import express from "express";
-import {trackRequest} from "./request-tracker.js";
+import { trackRequest } from "./request-tracker.js";
 import "./crash-guardian.js"
 
 const app = express();
@@ -80,6 +80,20 @@ app.get("/crash", (req, res) => {
     res.send("This call will crash the server! PM2 should restart it.");
     cpuHang();
 });
+
+app.get("/slow", (req, res) => {
+    console.log("[SERVER] Slow request received.");
+    // This request will stay "active" for 60 seconds
+    setTimeout(() => {
+        if (!res.writableEnded) {
+            res.send("Slow response finished.");
+        }
+    }, 60000);
+});
+
+
+
+
 
 
 // Stress Endpoint

@@ -1,0 +1,44 @@
+{
+  "time": "2026-02-17T09:58:28.153Z",
+  "pid": 122507,
+  "reason": "SIGNAL_SIGINT",
+  "error": null,
+  "stats": {
+    "memory": {
+      "rss": 258068480,
+      "heapTotal": 10063872,
+      "heapUsed": 8399928,
+      "external": 33910899,
+      "arrayBuffers": 31476355
+    },
+    "cpu": {
+      "user": 3450555,
+      "system": 203152
+    },
+    "load": [
+      1.01,
+      1.09,
+      1.4
+    ],
+    "uptime": 69.144123054,
+    "heap": {
+      "total_heap_size": 10063872,
+      "total_heap_size_executable": 524288,
+      "total_physical_size": 9515008,
+      "total_available_size": 4337465032,
+      "used_heap_size": 8403784,
+      "heap_size_limit": 4345298944,
+      "malloced_memory": 278624,
+      "peak_malloced_memory": 907304,
+      "does_zap_garbage": 0,
+      "number_of_native_contexts": 1,
+      "number_of_detached_contexts": 0,
+      "total_global_handles_size": 8192,
+      "used_global_handles_size": 4128,
+      "external_memory": 33910939
+    },
+    "activeHandles": 4,
+    "activeRequests": 0,
+    "ongoingApiCalls": []
+  }
+}
